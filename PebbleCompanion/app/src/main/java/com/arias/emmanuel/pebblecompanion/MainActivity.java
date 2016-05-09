@@ -247,6 +247,10 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                     TextView textView = (TextView) findViewById(R.id.txtGet);
                     textView.setText("Response: "+response + "\nData: " + text);
 
+                    // TODO no sirve
+                    Snackbar.make(view, "PUT succesful", Snackbar.LENGTH_LONG)
+                            .setAction("Action", null).show();
+
                     if (is != null) {
                         is.close();
                     }
