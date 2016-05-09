@@ -16,10 +16,12 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
+import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
 import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -29,19 +31,35 @@ import com.google.android.gms.appindexing.Action;
 import com.google.android.gms.appindexing.AppIndex;
 import com.google.android.gms.common.api.GoogleApiClient;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
+import java.util.Scanner;
 import java.util.UUID;
 
+// La clase implementa el manejador de Android para la localizaci[on
 public class MainActivity extends AppCompatActivity implements LocationListener {
 
     // esta variable viene del IDE cloudPebble
     private UUID uid = UUID.fromString("15bfbb0b-33d4-4d88-b749-a431cd78a6bf");
+
     protected LocationManager locationManager;
     TextView txtLat;
-    protected LocationListener locationListener;
 
+    private long compassData;
+    private double latitudeData, longitudeData;
+
+    // Maneja los mensajes recibidos desde el app Pebble
     PebbleKit.PebbleDataReceiver dataReceiver = new PebbleKit.PebbleDataReceiver(uid) {
 
         @Override
@@ -50,11 +68,13 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             // A new AppMessage was received, tell Pebble
             StringBuilder builder = new StringBuilder();
             builder.append("Compass: ");
-            builder.append(dict.getInteger(0).toString());
+            compassData = dict.getInteger(0);
+            builder.append(compassData);
             builder.append("°");
+
             TextView textViewDirection = (TextView) findViewById(R.id.text_view_direction);
             textViewDirection.setText(builder.toString());
-            System.out.println(builder.toString());
+            //System.out.println(builder.toString());
             PebbleKit.sendAckToPebble(context, transaction_id);
         }
 
@@ -86,8 +106,21 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     }
 
     @Override
+    public void onPause() {
+        super.onPause();
+
+        Context context = getApplicationContext();
+        PebbleKit.closeAppOnPebble(context, uid);
+
+        locationManager.removeUpdates(this);
+
+    }
+    @Override
     public void onStop() {
         super.onStop();
+
+        Context context = getApplicationContext();
+        PebbleKit.closeAppOnPebble(context, uid);
 
         // ATTENTION: This was auto-generated to implement the App Indexing API.
         // See https://g.co/AppIndexing/AndroidStudio for more information.
@@ -105,36 +138,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         client.disconnect();
     }
 
-    /**
-     * Created by Emmanuel on 24/04/2016.
-     */
-    private class MyLocationListener implements LocationListener {
-
-        @Override
-        public void onLocationChanged(Location loc) {
-            TextView textViewLoc = (TextView) findViewById(R.id.text_view_loc);
-            textViewLoc.setText("");
-
-            String longitude = "Longitude: " + loc.getLongitude();
-            String latitude = "Latitude: " + loc.getLatitude();
-
-            String s = longitude + "\n" + latitude;
-            textViewLoc.setText(s);
-        }
-
-        @Override
-        public void onProviderDisabled(String provider) {
-        }
-
-        @Override
-        public void onProviderEnabled(String provider) {
-        }
-
-        @Override
-        public void onStatusChanged(String provider, int status, Bundle extras) {
-        }
-    }
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -143,28 +146,117 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
 
+        Button btnPut = (Button) findViewById(R.id.btnPut);
+        btnPut.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                postPosition(view);
+            }
+        });
+
         FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
         fab.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
-                        .setAction("Action", null).show();
+                postPosition(view);
             }
         });
+
+        getPosition(null);
         // ATTENTION: This was auto-generated to implement the App Indexing API.
         // See https://g.co/AppIndexing/AndroidStudio for more information.
         client = new GoogleApiClient.Builder(this).addApi(AppIndex.API).build();
 
-        txtLat = (TextView) findViewById(R.id.text_view_loc);
+        TextView tv=(TextView)findViewById(R.id.txtGet);
+        tv.setMovementMethod(new ScrollingMovementMethod());
+    }
 
-        locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-        try {
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, this);
-        }
-        catch(SecurityException s){
-            txtLat = (TextView) findViewById(R.id.text_view_loc);
-            txtLat.setText(s.getMessage());
-        }
+    private void getPosition(View view){
+        new Thread() {
+            @Override
+            public void run() {
+                try {
+                    InputStream is = null;
+
+                    URL url = new URL("http://eariassoto.ddns.net/api/positions/1");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setReadTimeout(10000 /* milliseconds */);
+                    conn.setConnectTimeout(15000 /* milliseconds */);
+                    conn.setRequestMethod("GET");
+                    conn.setDoInput(true);
+                    // Starts the query
+                    conn.connect();
+                    int response = conn.getResponseCode();
+
+                    is = conn.getInputStream();
+
+                    // Convert the InputStream into a string
+                    String text = null;
+                    try (Scanner scanner = new Scanner(is, StandardCharsets.UTF_8.name())) {
+                        text = scanner.useDelimiter("\\A").next();
+                    }
+
+                    TextView textView = (TextView) findViewById(R.id.txtGet);
+                    textView.setText("Response: "+response + "\nData: " + text);
+
+                    if (is != null) {
+                        is.close();
+                    }
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }.start();
+
+    }
+
+    private void postPosition(View view){
+        new Thread() {
+            @Override
+            public void run() {
+                try {
+                    InputStream is = null;
+                    String str =  "{\"compass\": "+compassData+",\"latitude\":\""+latitudeData+"\",\"longitude\":\""+longitudeData+"\"}";
+                    URL url = new URL("http://eariassoto.ddns.net/api/positions/1");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setReadTimeout(10000 /* milliseconds */);
+                    conn.setConnectTimeout(15000 /* milliseconds */);
+                    conn.setRequestMethod("PUT");
+                    conn.setDoInput(true);
+
+                    conn.setRequestProperty("Content-Type","application/json");
+                    conn.setRequestProperty("Content-Length", "" + Integer.toString(str.getBytes().length));
+                    byte[] outputInBytes = str.getBytes("UTF-8");
+                    OutputStream os = conn.getOutputStream();
+                    os.write(outputInBytes);
+                    os.close();
+
+                    // Starts the query
+                    conn.connect();
+                    int response = conn.getResponseCode();
+
+                    is = conn.getInputStream();
+
+                    // Convert the InputStream into a string
+                    String text = null;
+                    try (Scanner scanner = new Scanner(is, StandardCharsets.UTF_8.name())) {
+                        text = scanner.useDelimiter("\\A").next();
+                    }
+
+                    TextView textView = (TextView) findViewById(R.id.txtGet);
+                    textView.setText("Response: "+response + "\nData: " + text);
+
+                    if (is != null) {
+                        is.close();
+                    }
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }.start();
+
     }
 
     @Override
@@ -220,21 +312,24 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
 
         PebbleKit.registerReceivedDataHandler(context, dataReceiver);
 
+        txtLat = (TextView) findViewById(R.id.text_view_loc);
+
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         try {
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, this);
-
             locationManager.requestSingleUpdate(LocationManager.GPS_PROVIDER, this, null);
+            //locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, this);
+
             Location loc = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
 
-            String latitude = "Latitude: " + loc.getLatitude();
-            String longitude = "Longitude: " + loc.getLongitude();
+            latitudeData = loc.getLatitude();
+            longitudeData = loc.getLongitude();
 
-            String s = longitude + "\n" + latitude;
+            String latitude = "Latitude: " + latitudeData;
+            String longitude = "Longitude: " + longitudeData;
 
-            TextView textViewLoc = (TextView) findViewById(R.id.text_view_loc);
-            textViewLoc.setText("");
-            textViewLoc.setText(s);
+            String s = latitude + "\n" + longitude;
+
+            txtLat.setText(s);
         }
         catch(SecurityException s){
             txtLat = (TextView) findViewById(R.id.text_view_loc);
@@ -242,12 +337,16 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         }
 
 
+        getPosition(null);
+
     }
 
     @Override
     public void onLocationChanged(Location location) {
         txtLat = (TextView) findViewById(R.id.text_view_loc);
-        txtLat.setText("Latitude:" + location.getLatitude() + ", Longitude:" + location.getLongitude());
+        latitudeData = location.getLatitude();
+        longitudeData = location.getLongitude();
+        txtLat.setText("Latitude:" + latitudeData + ", Longitude:" + longitudeData);
     }
 
     @Override
